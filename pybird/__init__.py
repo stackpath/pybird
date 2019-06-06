@@ -5,6 +5,7 @@ from builtins import object
 import logging
 import re
 import socket
+import itertools
 from datetime import datetime, timedelta
 from subprocess import Popen, PIPE
 
@@ -28,6 +29,7 @@ class PyBird(object):
         self.clean_input_re = re.compile(r'\W+')
         self.field_number_re = re.compile(r'^(\d+)[ -]')
         self.routes_field_re = re.compile(r'(\d+) imported, (\d+) exported')
+        self.routes_field_extended_re = re.compile(r'(\d+) imported, (\d+) filtered, (\d+) exported, (\d+) preferred')
         self.log = logging.getLogger(__name__)
 
     def get_config(self):
@@ -398,7 +400,7 @@ bogus undo:
 
             if field_number == 1002:
                 peer_summary = self._parse_peer_summary(line)
-                if peer_summary['protocol'] != 'BGP':
+                if peer_summary['protocol'] not in ['BGP','OSPF']:
                     peer_summary = None
                     continue
 
@@ -485,6 +487,13 @@ bogus undo:
               Route limit:      9/1000
               Hold timer:       112/180
               Keepalive timer:  16/60
+              Local capabilities
+                Multiprotocol
+                  AF announced: ipv4
+                Route refresh
+              Neighbord capabilities
+                Multiprotocol
+                   AF accounced: ipv4
 
         peer_detail_raw must be an array, where each element is a line of BIRD output.
 
@@ -508,18 +517,51 @@ bogus undo:
             'neighbor id': 'router_id',
             'neighbor address': 'address',
             'neighbor as': 'asn',
+            'last error': 'last_error',
+            'ipv4_state': 'ipv4_state',
             }
         lineiterator = iter(peer_detail_raw)
 
+        watchindent = 0
+        prefix = ""
         for line in lineiterator:
+            linelen = len(line)
             line = line.strip()
+            indent = linelen - len(line)
+
+            if "capabilities" in line and line.split(" ", 1)[1] == "capabilities":
+                # in lieu of having ability to peek
+                (line,) = self._skip_block(indent, lineiterator)
+                if not line:
+                    break
+                else:
+                    linelen = len(line)
+                    indent = linelen - len(line)
+                    line = line.strip()
+
+
+            if line.startswith("Channel"):
+                watchindent = indent
+                prefix = line.split(" ", 1)[1] + "_"
+                continue
+            if indent <= watchindent:
+                watchindent = 0
+                prefix = ""
+
             (field, value) = line.split(":", 1)
             value = value.strip()
 
             if field.lower() == "routes":
-                routes = self.routes_field_re.findall(value)[0]
-                result['routes_imported'] = int(routes[0])
-                result['routes_exported'] = int(routes[1])
+                if "filtered" in value:
+                    routes = self.routes_field_extended_re.findall(value)[0]
+                    result['routes_imported'] = int(routes[0])
+                    result['routes_filtered'] = int(routes[1])
+                    result['routes_exported'] = int(routes[2])
+                    result['routes_preferred'] = int(routes[3])
+                else:
+                    routes = self.routes_field_re.findall(value)[0]
+                    result['routes_imported'] = int(routes[0])
+                    result['routes_exported'] = int(routes[1])
 
             if field.lower() in route_change_fields:
                 (received, rejected, filtered, ignored, accepted) = value.split()
@@ -535,10 +577,161 @@ bogus undo:
                 self._parse_route_stats(
                     result, key_name_base + '_accepted', accepted)
 
+            if len(prefix):
+                field = prefix + field
             if field.lower() in field_map.keys():
                 result[field_map[field.lower()]] = value
 
         return result
+
+    def get_ospf_protocols(self, protocol_name=None):
+        """
+        Get stats on OSPF protocol connections
+        """
+        if protocol_name:
+            query = 'show ospf "%s"' % self._clean_input(protocol_name)
+        else:
+            query = 'show ospf'
+
+        data = self._send_query(query)
+        if not self.socket_file:
+            return data
+
+        protocols = self._parse_ospf_protocols(data=data)
+
+        if not protocol_name:
+            return protocols
+
+        if len(protocols) == 0:
+            return []
+        elif len(protocols) > 1:
+            raise ValueError(
+                "Searched for a specific protocol, but got multiple returned from BIRD?")
+        else:
+            return protocols[0]
+
+    def _parse_ospf_protocols(self, data):
+        """Parse the data from BIRD to find OSPF information."""
+        lineiterator = iter(data.splitlines())
+        protocols = []
+
+        for line in lineiterator:
+            line = line.strip()
+            (field_number, line) = self._extract_field_number(line)
+
+            if field_number in self.ignored_field_numbers:
+                continue
+
+            protocol_detail = {}
+            if field_number == 1014:
+
+                # A peer summary spans multiple lines, read them all
+                protocol_detail_raw = []
+
+                protocol_detail['name'] = line.strip().split(":",1)[0]
+
+
+                line = next(lineiterator)
+
+                while line.strip() != "" and line.strip() != "0000":
+                    protocol_detail_raw.append(line)
+                    line = next(lineiterator)
+
+                protocol_detail.update(self._parse_ospf_protocol_details(protocol_detail_raw))
+
+                protocols.append(protocol_detail)
+
+        return protocols
+
+    def _parse_ospf_protocol_details(self, ospf_protocol_raw):
+        """Parse OSPF protocol info
+            RFC1583 compatibility: disabled
+            Stub router: No
+            RT scheduler tick: 1
+            Number of areas: 1
+            Number of LSAs in DB:	2
+                Area: 0.0.0.0 (0) [BACKBONE]
+                    Stub:	No
+                    NSSA:	No
+                    Transit:	No
+                    Number of interfaces:	2
+                    Number of neighbors:	1
+                    Number of adjacent neighbors:	1
+        """
+        result = {}
+        result["areas"] = []
+
+        count_fields = [
+            "number of areas",
+            "number of lsas in db",
+            "number of neighbors",
+            "number of adjacent neighbors",
+            "number of interfaces",
+        ]
+
+        field_map = {
+            "number of areas": "area_count",
+            "number of lsas in db": "lsa_count",
+            "number of interfaces": "interface_count",
+            "number of neighbors": "neighbor_count",
+            "number of adjacent neighbors": "adjacent_count"
+            }
+
+
+        lineiterator = iter(ospf_protocol_raw)
+
+        prefix = ""
+        curresult = result
+        area_result = None
+        watchindent = 0
+        for line in lineiterator:
+            linelen = len(line)
+            line = line.strip()
+            indent = linelen - len(line)
+
+            (field, value) = line.split(":", 1)
+            value = value.strip()
+
+            if watchindent and indent <= watchindent:
+                watchindent = 0
+                curresult = result
+
+            if field.lower() == "area":
+                area_result = {}
+                (area_name, num, type) = value.split(" ")
+                watchindent = indent
+                area_result["name"] = area_name
+                curresult = area_result
+                result['areas'].append(area_result)
+
+            if len(prefix):
+                field = prefix + field
+            if field.lower() in field_map.keys():
+                
+                if field.lower() in count_fields:
+                    curresult[field_map[field.lower()]] = int(value)
+                else:
+                    curresult[field_map[field.lower()]] = value
+
+        return result
+    
+
+    def _skip_block(self, cap_indent, lineiterator):
+        """
+        Skip over a block until a new block is found (lower indent)
+        """
+
+        for line in lineiterator:
+            linelen = len(line)
+            sline = line.strip()
+            indent = linelen - len(sline)
+
+            if indent < cap_indent:
+                break
+            
+        return (line, )
+
+
 
     def _parse_route_stats(self, result_dict, key_name, value):
         if value.strip() == "---":
@@ -584,6 +777,21 @@ bogus undo:
 
             except ValueError:
                 parsed_value = datetime.strptime(value, "%H:%M:%S")
+
+            result_date = datetime(
+                now.year, now.month, now.day, parsed_value.hour, parsed_value.minute)
+
+            if now.hour < parsed_value.hour or (now.hour == parsed_value.hour and now.minute < parsed_value.minute):
+                result_date = result_date - timedelta(days=1)
+
+            return result_date
+        except ValueError:
+            # It's a different format, keep on processing
+            pass
+
+        # Case: HH:mm or HH:mm:ss.ms timestamp
+        try:
+            parsed_value = datetime.strptime(value, "%H:%M:%S.%f")
 
             result_date = datetime(
                 now.year, now.month, now.day, parsed_value.hour, parsed_value.minute)

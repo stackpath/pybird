@@ -1,0 +1,14 @@
+[
+    {"area_count": 1, 
+    "areas": 
+    [
+        {"adjacent_count": 1, 
+        "neighbor_count": 1,
+        "name": "0.0.0.0", 
+        "interface_count": 2 
+        }
+    ], 
+    "name": "foo_igp", 
+    "lsa_count": 2
+}
+]

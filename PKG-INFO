@@ -1,6 +1,6 @@
 Metadata-Version: 1.1
 Name: pybird
-Version: 1.0.10
+Version: 1.1.1.2+stackpath
 Author: Erik Romijn
 Author-email: eromijn at solidlinks nl
 Summary: BIRD interface handler for Python

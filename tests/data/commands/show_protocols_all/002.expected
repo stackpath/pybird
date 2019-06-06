@@ -1,0 +1,12 @@
+[
+    {"protocol": "BGP", 
+    "description": "Peer session - aaa10", 
+    "ipv4_state": "DOWN",
+    "last_error": "Socket: Connection refused",
+    "up": false, 
+    "state": "Active", 
+    "address": "192.168.8.1", 
+    "last_change": "2019-06-05T00:42:00", 
+    "asn": "4220101000", 
+    "name": "peer_aaa10"}
+]

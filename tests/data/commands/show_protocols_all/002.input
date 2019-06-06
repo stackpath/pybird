@@ -1,0 +1,23 @@
+
+0001 BIRD 2.0.4 ready.
+2002-Name       Proto      Table      State  Since         Info
+1002-bfd1       BFD        ---        up     2019-06-03
+1006-
+1002-peer_aaa10 BGP        ---        start  00:42:26.125  Active        Socket: Connection refused
+1006-  Description:    Peer session - aaa10
+   BGP state:          Active
+     Neighbor address: 192.168.8.1
+     Neighbor AS:      4220101000
+     Connect delay:    0.142/5
+     Last error:       Socket: Connection refused
+   Channel ipv4
+     State:          DOWN
+     Table:          foo_net
+     Preference:     100
+     Input filter:   (unnamed)
+     Output filter:  (unnamed)
+     Import limit:   25000
+       Action:       disable
+     IGP IPv4 table: foo_net
+
+0000
