@@ -187,6 +187,12 @@ class PyBirdTestCase(MockBirdTestBase):
             print(filedata.dumps(status))
             assert expected == status
 
+    def test_get_ospf_all(self):
+        """Test that we can get a list of OSPF protocols
+        Testing of individual fields here is limited, that's mostly done
+        in test_specific_peer_status()."""
+        self.run_method_test('get_ospf_protocols')
+        
 
 class MockBirdTestCase(MockBirdTestBase):
     """Run a basic test to see whether our mocked BIRD control socket

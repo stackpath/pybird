@@ -1,0 +1,16 @@
+
+0001 BIRD 2.0.4 ready.
+1014-foo_igp:
+ RFC1583 compatibility: disabled
+ Stub router: No
+ RT scheduler tick: 1
+ Number of areas: 1
+ Number of LSAs in DB:	2
+ 	Area: 0.0.0.0 (0) [BACKBONE]
+ 		Stub:	No
+ 		NSSA:	No
+ 		Transit:	No
+ 		Number of interfaces:	2
+ 		Number of neighbors:	1
+ 		Number of adjacent neighbors:	1
+0000
